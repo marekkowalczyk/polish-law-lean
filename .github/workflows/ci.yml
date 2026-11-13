@@ -1,0 +1,60 @@
+name: PolishLawLean CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Cache Lean and Lake packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            .lake
+          key: lean-build-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'lake-manifest.json') }}
+          restore-keys: |
+            lean-build-
+
+      - name: Fetch Mathlib cache
+        run: |
+          lake exe cache get
+
+      - name: Build PolishLawLean
+        run: |
+          lake build
+
+      - name: Verify no sorry / no extra axioms and generate axiom report
+        run: |
+          bash scripts/check_axioms.sh axiom-report.txt
+          {
+            echo "## Axiom Audit Report"
+            echo ""
+            echo '```text'
+            cat axiom-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload axiom report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: axiom-report
+          path: axiom-report.txt
